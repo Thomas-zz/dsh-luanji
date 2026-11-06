@@ -105,6 +105,7 @@ node test/dev-server.mjs 8129   # 隔离开发页（不碰真实笔记目录）
 - [本地+云端同步设计](docs/cloud-sync.md)
 - [2026-11-05 记录与找回验证](docs/verification-20261105.md)
 - [2026-11-06 界面改版验证](docs/verification-20261106.md)
+- [2026-11-06 云端同步验证](docs/verification-cloud-sync.md)
 
 主要文件：`client.js` 交互与主题；`host/store.js` 记录数据；`host/cloud.js` 可选云端同步；`host/routes.js` 本机 API；`host/search.js` 搜索；`host/tool.js` agent 工具；`test/` 测试与隔离开发页。
 
