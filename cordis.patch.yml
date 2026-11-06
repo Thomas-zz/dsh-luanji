@@ -1,0 +1,12 @@
+# dsh-luanji bundle 层：一张纸（侧栏面板 + agent 工具）。
+# Host 半提供本机 JSON 存储、/dsh-luanji HTTP 前缀路由与 luanji 工具；
+# Client 半声明于 package.json 的 dsh.client，由 DSH 提供。
+- insert:
+    - id: dsh-luanji
+      name: '@dsh-external/dsh-luanji'
+# 可选：接自己的「乱记兼容」云端数据服务（默认不配置 = 完全本地）。
+# 详见 docs/cloud-sync.md。
+#    config:
+#      cloud:
+#        url: https://your-data-service.example
+#        token: '<长期 token>'   # 或 cookie / headers

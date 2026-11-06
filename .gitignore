@@ -1,0 +1,14 @@
+node_modules/
+*.log
+.DS_Store
+.tmp/
+test/*.tmp
+
+# 现场截图含真实对话内容，不随公开仓库发布
+docs/ui-*.png
+docs/real-web-*.png
+docs/capture-*.png
+docs/management-*.png
+docs/quick-note-*.png
+docs/quote-draft-*.png
+docs/ui-preview.png

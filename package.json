@@ -1,0 +1,40 @@
+{
+  "name": "@dsh-external/dsh-luanji",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "description": "乱记 for DSH：划选记录、引用思考、随手便签。原文留在本机，记住每句话的来处。",
+  "license": "MIT",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "host/*.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/host.test.mjs test/routes.test.mjs test/cloud.test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-chat",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ]
+    }
+  }
+}
