@@ -21,6 +21,24 @@
 - **会回来**：原句在对话里以淡底 + 下划线标记，刷新/回到对话仍能恢复；记录可「回到对话」。
 - **可选云端**：配置自己的「乱记兼容」数据服务后，可手动从云端拉取 / 推送到云端（见 [docs/cloud-sync.md](docs/cloud-sync.md)）。
 
+## 界面一览
+
+划选对话里的原话，浮动条上直接「记录 / 引用并记录 / 引用文本」：
+
+![划选记录](docs/screenshots/selection-light.png)
+
+引用便签：原文在上、想法在下，来源（模型 · 会话）跟着走：
+
+![引用便签](docs/screenshots/quote-light.png)
+
+点侧栏「乱记」行，就近弹出速记便签，先记住、不必先起标题：
+
+![快捷便签](docs/screenshots/capture-light.png)
+
+管理面板：搜索、编辑、导入导出，明暗两套主题：
+
+![管理面板（暗色）](docs/screenshots/panel-dark.png)
+
 ## 入口与操作
 
 | 入口 | 操作 |
