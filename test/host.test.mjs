@@ -196,6 +196,55 @@ test('旧 v1 文本数据无损迁移，保存前一版本备份', () => {
   assert.equal(fs.readFileSync(path.join(dir, 'notes.json.bak'), 'utf8'), original)
 })
 
+test('旧 v2 数据升级到 v3（A13）：引用、时间、图片、草稿完整，v2 备份可读', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'luanji-v2-upgrade-'))
+  const v2 = {
+    v: 2,
+    records: [{ id: 'r1', text: '带引用的旧记录', images: [{ id: 'i1', name: '旧图.png', data: tinyImage.data }], quoteId: 'q1', source: 'selection', created_at: 1700000000000, updated_at: 1700000001000 }],
+    quotes: [{ ...quotation(), id: 'q1' }],
+    draft: '旧草稿',
+    drafts: { quick: { text: '入口草稿', images: [], quote: null } },
+  }
+  const original = JSON.stringify(v2)
+  fs.writeFileSync(path.join(dir, 'notes.json'), original)
+  const store = createStore({ dataDir: dir })
+  const state = store.state()
+  assert.equal(state.schemaVersion, 3)
+  assert.equal(state.records[0].text, '带引用的旧记录')
+  assert.equal(state.records[0].quote.text, '原话，不要改写。')
+  assert.equal(state.records[0].images[0].data, tinyImage.data)
+  assert.equal(state.records[0].created_at, 1700000000000)
+  assert.equal(state.draft, '旧草稿')
+  assert.equal(state.drafts.quick.text, '入口草稿')
+  // 同步元数据从默认状态起步（未绑定、无待办）
+  assert.equal(store.syncSummary().bound, false)
+  assert.equal(store.syncSummary().pendingOps, 0)
+  // 首次写入后保留完整 v2 备份（可独立读取回滚）
+  store.add({ text: '升级后的新记录' })
+  const backup = JSON.parse(fs.readFileSync(path.join(dir, 'notes.json.v2.bak'), 'utf8'))
+  assert.equal(backup.v, 2)
+  assert.equal(backup.records[0].id, 'r1')
+  assert.equal(JSON.stringify(backup.quotes), JSON.stringify(v2.quotes))
+  // 升级失败不影响原文件：损坏文件仍被拒绝覆盖
+  const broken = fs.mkdtempSync(path.join(os.tmpdir(), 'luanji-v3-broken-'))
+  fs.writeFileSync(path.join(broken, 'notes.json'), '{broken')
+  assert.throws(() => createStore({ dataDir: broken }), /原文件已保留/)
+})
+
+test('v3 同步元数据随记录原子落盘：未绑定的编辑不排队、删除物理移除', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'luanji-v3-persist-'))
+  const store = createStore({ dataDir: dir })
+  store.saveDraft('先落一次盘')
+  const disk = JSON.parse(fs.readFileSync(path.join(dir, 'notes.json'), 'utf8'))
+  assert.equal(disk.sync.enabled, false)
+  store.add({ text: '第一条' })
+  // 未绑定时编辑不排队
+  assert.equal(store.syncSummary().pendingOps, 0)
+  assert.ok(store.remove(store.all()[0].id))
+  // 未绑定删除 = 物理删除
+  assert.equal(store.count, 0)
+})
+
 test('损坏的数据文件不会被当成空笔记覆盖', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'luanji-corrupt-'))
   fs.writeFileSync(path.join(dir, 'notes.json'), '{broken')

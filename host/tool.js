@@ -41,9 +41,10 @@ function line(record) {
  *
  * @param {object} store - 记录存储实例。
  * @param {object} intelligence - { search }。
+ * @param {object} [hooks] - { onRecordChange }：记录变更时通知同步引擎。
  * @returns {object} `ctx.tools.register` 定义。
  */
-export function createLuanjiTool(store, intelligence) {
+export function createLuanjiTool(store, intelligence, hooks = {}) {
   return {
     name: TOOL_NAME,
     description: [
@@ -101,6 +102,7 @@ export function createLuanjiTool(store, intelligence) {
         const action = args?.action
         if (action === 'add') {
           const record = store.add({ text: args?.content ?? '', source: 'agent' })
+          try { hooks.onRecordChange?.() } catch { /* 同步引擎不在也不影响记录 */ }
           return { text: `已记录（${stamp(record.created_at)}，共 ${store.count} 条）。` }
         }
         if (action === 'find') {

@@ -1,0 +1,36 @@
+# 乱记个人同步服务：单容器部署模板。
+#
+# 用法（在仓库根目录）：
+#   docker compose -f server/compose.yaml up -d --build
+#
+# 安全模型：
+#   - 端口只发布到宿主机回环（127.0.0.1），由反向代理提供 HTTPS 对外；
+#   - 数据全部落在命名卷 luanji-data（SQLite + 附件 + 每日快照）；
+#   - 容器以非 root 用户运行。
+#
+# 首次启动后进入容器生成设备 Token 与手机口令（见 docs/sync-deployment.md）：
+#   docker compose -f server/compose.yaml exec luanji-sync node src/admin.mjs token-create --name "我的 Mac"
+#   docker compose -f server/compose.yaml exec luanji-sync node src/admin.mjs password-set
+
+services:
+  luanji-sync:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    image: luanji-sync-server:1.0.0
+    container_name: luanji-sync
+    restart: unless-stopped
+    environment:
+      # 只含占位/默认值；需要覆盖时用 .env 或下方 env_file（见 .env.example）。
+      LUANJI_DATA_DIR: /data
+      LUANJI_PORT: "8390"
+      # LUANJI_QUOTA_BYTES: "5368709120"      # 附件总容量（默认 5 GiB）
+      # LUANJI_MAX_BLOB_BYTES: "2097152"      # 单附件上限（默认 2 MiB）
+      # LUANJI_SNAPSHOT_HOUR: "3"             # 每日一致性快照时段（默认凌晨 3 点）
+    ports:
+      - "127.0.0.1:8390:8390"   # 仅回环！对外请走反向代理 HTTPS
+    volumes:
+      - luanji-data:/data
+
+volumes:
+  luanji-data:

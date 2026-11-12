@@ -18,11 +18,12 @@ function tempStore() {
   return createStore({ dataDir: dir })
 }
 
-/** 极简 req/res 桩。 */
-function mockReq(method, url, body) {
+/** 极简 req/res 桩（headers 模拟真实客户端：本机写接口要求 x-luanji 头）。 */
+function mockReq(method, url, body, headers = {}) {
   const req = new EventEmitter()
   req.method = method
   req.url = url
+  req.headers = { 'x-luanji': '1', ...headers }
   if (body !== undefined) {
     queueMicrotask(() => {
       req.emit('data', JSON.stringify(body))
@@ -150,7 +151,7 @@ test('坏请求与 404', async () => {
 test('引用记录 HTTP 闭环：协议、独立来源、图片草稿和提交清理', async () => {
   const store = tempStore(), handler = createHandler(store, intelligence)
   const initial = JSON.parse((await call(handler, 'GET', '/dsh-luanji/state')).body)
-  assert.equal(initial.schemaVersion, 2)
+  assert.equal(initial.schemaVersion, 3)
   const quote = { text: '被划选的原句', origin: { role: 'assistant', model: '模型 A', sessionId: 'session-a', nodeKey: 'a', seq: 15 }, anchor: { exact: '被划选的原句', start: 0, end: 7 } }
   await call(handler, 'PUT', '/dsh-luanji/draft', { key: 'quote', draft: { text: '自己的想法', quote } })
   const res = JSON.parse((await call(handler, 'POST', '/dsh-luanji/notes', { id: 'stable-request', text: '自己的想法', quote, draftKey: 'quote' })).body)

@@ -8,7 +8,7 @@ window.__ModuleLoader__.load({
     const API = '/dsh-luanji'
     const empty = () => ({ text: '', images: [], quote: null })
     let ctx, disposed = false, toastTimer, highlightTimer, refreshSequence = 0
-    let state = { ready: false, loaded: false, records: [], error: '', drafts: { quick: empty(), manage: empty(), quote: empty() }, draftStatus: {}, open: null, toast: '', undo: null, busy: false, cloud: { configured: false } }
+    let state = { ready: false, loaded: false, records: [], error: '', drafts: { quick: empty(), manage: empty(), quote: empty() }, draftStatus: {}, open: null, toast: '', undo: null, busy: false, cloud: { configured: false }, sync: null, syncDialog: null }
     const listeners = new Set()
     const set = (patch) => { if (disposed) return; state = { ...state, ...patch }; listeners.forEach((fn) => fn()) }
     const subscribe = (fn) => { listeners.add(fn); return () => listeners.delete(fn) }
@@ -21,7 +21,7 @@ window.__ModuleLoader__.load({
       toastTimer = setTimeout(() => set({ toast: '', undo: null }), 4500)
     }
     async function api(path, options = {}) {
-      const response = await fetch(API + path, { ...options, headers: { 'content-type': 'application/json' }, body: options.body === undefined ? undefined : JSON.stringify(options.body) })
+      const response = await fetch(API + path, { ...options, headers: { 'content-type': 'application/json', 'x-luanji': '1', ...(options.headers || {}) }, body: options.body === undefined ? undefined : JSON.stringify(options.body) })
       const data = await response.json().catch(() => ({ error: '服务没有返回有效数据。' }))
       if (!response.ok || data.ok === false) throw new Error(data.error || '暂时无法保存，请重试。')
       return data
@@ -29,11 +29,12 @@ window.__ModuleLoader__.load({
     async function refresh() {
       const sequence = ++refreshSequence
       try {
-        const [data, cloudInfo] = await Promise.all([api('/state'), api('/cloud').catch(() => null)])
-        if (data.schemaVersion !== 2) throw new Error('乱记界面已更新，请重新加载插件或重启 DSH，以启用新的记录存储。')
+        const [data, cloudInfo, syncInfo] = await Promise.all([api('/state'), api('/cloud').catch(() => null), api('/sync').catch(() => null)])
+        if (data.schemaVersion !== 3) throw new Error('乱记界面已更新，请重新加载插件或重启 DSH，以启用新的记录存储。')
         if (sequence !== refreshSequence) return
         const patch = { ready: true, loaded: true, error: '', records: data.records || [] }
         if (cloudInfo?.cloud) patch.cloud = cloudInfo.cloud
+        if (syncInfo?.sync) patch.sync = syncInfo.sync
         if (!hydrated) {
           const initial = { quick: empty(), manage: { ...empty(), text: data.draft || '' }, quote: empty(), ...data.drafts }
           patch.drafts = Object.fromEntries(Object.entries(initial).map(([key, value]) => [key, revisions.has(key) ? state.drafts[key] : value]))
@@ -156,12 +157,16 @@ window.__ModuleLoader__.load({
         const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale))
         canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close()
         const data = canvas.toDataURL('image/webp', .86)
-        if (data.length > 3 * 1024 * 1024) throw new Error('图片缩小后仍超过 2 MB，请换一张。')
+        if (data.length > 2_760_000) throw new Error('图片压缩后仍超过云端同步上限（约 2 MB），请换一张。')
         return { id: crypto.randomUUID(), name: file.name || '粘贴的图片', data }
       })
     }
     function ImageList({ items, onRemove }) {
-      return items?.length ? h('div', { className: 'lj-images' }, items.map((im) => h('div', { className: 'lj-image', key: im.id }, h('img', { src: im.data, alt: im.name, loading: 'lazy' }), onRemove && h('button', { type: 'button', className: 'lj-image-remove', title: '移除图片', 'aria-label': '移除图片', onClick: () => onRemove(im.id) }, h(Icon, { kind: 'close', size: 12 }))))) : null
+      return items?.length ? h('div', { className: 'lj-images' }, items.map((im) => h('div', { className: 'lj-image', key: im.id },
+        im.data
+          ? h('img', { src: im.data, alt: im.name, loading: 'lazy' })
+          : h('span', { className: 'lj-image-pending', title: '附件尚未下载完成' }, h(Icon, { kind: 'image', size: 15 }), '待下载'),
+        onRemove && h('button', { type: 'button', className: 'lj-image-remove', title: '移除图片', 'aria-label': '移除图片', onClick: () => onRemove(im.id) }, h(Icon, { kind: 'close', size: 12 }))))) : null
     }
     function Composer({ draftKey, floating = false }) {
       const s = useState(), value = s.drafts[draftKey]
@@ -231,6 +236,7 @@ window.__ModuleLoader__.load({
     function Overlays() {
       const s = useState()
       return createPortal(h('div', { className: 'lj-overlays', 'data-luanji-ui': '' },
+        s.syncDialog && h(SyncDialog),
         s.open && h('section', { className: 'lj-float', role: 'dialog', 'aria-label': s.open === 'quote' ? '引用并记录' : '乱记便签', style: floatStyle(anchorNow()), onKeyDown: (e) => { if (e.key === 'Escape' && !s.busy) { e.stopPropagation(); closeComposer() } } },
           h('div', { className: 'lj-float-head' },
             h('div', { className: 'lj-float-title' }, h('span', { className: 'lj-mark' }, h(Icon, { kind: 'note', size: 15 })), h('strong', null, s.open === 'quote' ? '引用并记录' : '乱记'), h('span', { className: 'lj-float-sub' }, s.open === 'quote' ? '原文在上，想法在下' : '先留下，再理解')),
@@ -319,6 +325,170 @@ window.__ModuleLoader__.load({
             h('button', { className: 'lj-quiet', onClick: () => { setValue(record.text); setEditing(true) } }, h(Icon, { kind: 'edit', size: 13 }), record.quote && !record.text ? '补充想法' : '编辑'),
             h('button', { className: 'lj-quiet' + (confirm ? ' lj-danger' : ''), disabled: saving, onBlur: () => setConfirm(false), onClick: () => void remove() }, h(Icon, { kind: 'trash', size: 13 }), confirm ? '确认删除' : '删除'))))
     }
+    // ── 云端同步 v1：状态条 + 设置/详情浮层（docs/sync-protocol-v1.md） ──
+    const SYNC_PHASES = { synced: '已同步', syncing: '正在同步', waiting: '等待网络', conflict: '需要处理冲突', attention: '需要处理', off: '未开启' }
+    const syncWhen = (ms) => ms ? new Date(ms).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
+    /** 供「复制 AI 部署提示词」用的模板全文（与 docs/sync-deploy-prompt.md 一致）。 */
+    const DEPLOY_PROMPT = [
+      '请根据我指定的 luanji-sync-server 仓库和固定版本，部署我的个人乱记同步服务。',
+      '先读取该版本 README、compose.yaml 和 docs/sync-protocol-v1.md，再只读检查服务器 OS、Docker、磁盘、端口、域名与现有反向代理。',
+      '使用独立目录、持久化数据卷和独立凭据，保持现有应用运行；不覆盖现有站点配置、不清理旧表。',
+      '配置有效 HTTPS、接口鉴权、请求限制；用管理命令生成独立设备 Token 和手机登录口令；不在聊天或日志打印任何秘密。',
+      '生成每日一致性备份与恢复说明。',
+      '用临时测试记录验证连接、上传、拉取、重复请求幂等与鉴权失败；不读取、不上传我的真实笔记。',
+      '交付：服务地址、密钥私密领取方法、手机地址、备份位置、版本、检查结果与回滚方法。',
+      '涉及尚未授权的生产变更时先展示具体改动并取得授权；缺域名或证书信息时报告缺项，不要擅自关闭 TLS 校验。',
+    ].join('\n')
+
+    /** 管理页里的同步状态条（未开启时是入口，开启后是状态卡）。 */
+    function SyncBar() {
+      const s = useState()
+      const sync = s.sync
+      if (!sync || !sync.configured) {
+        return h('section', { className: 'lj-cloudbar', 'aria-label': '云端同步' },
+          h('span', { className: 'lj-cloud-dot lj-off', 'aria-hidden': true }),
+          h('span', { className: 'lj-cloud-text' }, '云端同步 · 未开启'),
+          h('span', { className: 'lj-cloud-meta' }, '记录保存在本机。开启后可与其他设备同步。'),
+          h('div', { className: 'lj-cloud-actions' },
+            h('button', { type: 'button', className: 'lj-ghost lj-small', onClick: () => set({ syncDialog: 'setup' }) }, '配置自己的服务器')))
+      }
+      const phaseText = SYNC_PHASES[sync.phase] || sync.phase
+      const problem = sync.phase === 'conflict' || sync.phase === 'attention' || (sync.lastError && sync.phase === 'waiting')
+      return h('section', { className: 'lj-cloudbar', 'aria-label': '云端同步' },
+        h('span', { className: 'lj-cloud-dot' + (problem ? ' lj-warn' : sync.phase === 'syncing' ? ' lj-busy' : ''), 'aria-hidden': true }),
+        h('span', { className: 'lj-cloud-text' }, '云端 · ', sync.host || sync.url),
+        h('span', { className: 'lj-cloud-meta' },
+          '状态：', phaseText,
+          sync.lastSyncAt ? ` · 最近成功 ${syncWhen(sync.lastSyncAt)}` : '',
+          sync.pendingOps ? ` · 待同步 ${sync.pendingOps} 条` : '',
+          sync.missingBlobs ? ` · 待下载附件 ${sync.missingBlobs} 个` : '',
+          sync.conflicts ? ` · 冲突 ${sync.conflicts} 条` : ''),
+        h('div', { className: 'lj-cloud-actions' },
+          h('button', { type: 'button', className: 'lj-ghost lj-small', onClick: async () => { try { await api('/sync/now', { method: 'POST' }); await refresh() } catch (e) { toast(e.message) } } }, '立即同步'),
+          h('button', { type: 'button', className: 'lj-ghost lj-small', onClick: () => set({ syncDialog: 'status' }) }, sync.conflicts || sync.attention ? '查看详情' : '详情')))
+    }
+
+    /** 冲突/记录预览（本地格式或 wire 格式都只取文本、引用与附件数）。 */
+    function SyncPreview({ label, value }) {
+      const quote = value?.quote?.text || (value?.quoteId ? '' : '')
+      const images = Array.isArray(value?.images) ? value.images.length : Array.isArray(value?.attachments) ? value.attachments.length : 0
+      return h('div', { className: 'lj-sync-preview' },
+        h('span', { className: 'lj-sync-preview-label' }, label),
+        value?.deleted_at ? h('p', { className: 'lj-sync-deleted' }, '（已删除）')
+          : h('p', { className: 'lj-sync-text' }, value?.text || (quote ? '' : '（无正文）')),
+        quote && h('p', { className: 'lj-sync-quote' }, '引用：', quote.slice(0, 120)),
+        images ? h('p', { className: 'lj-sync-meta' }, `图片 ${images} 张`) : null)
+    }
+
+    /** 同步设置/详情浮层。 */
+    function SyncDialog() {
+      const s = useState()
+      const [view, setView] = React.useState(s.syncDialog === 'status' ? 'status' : 'setup')
+      const [url, setUrl] = React.useState(s.sync?.savedConfig?.url || '')
+      const [deviceName, setDeviceName] = React.useState(s.sync?.savedConfig?.deviceName || '')
+      const [token, setToken] = React.useState('')
+      const [showToken, setShowToken] = React.useState(false)
+      const [testing, setTesting] = React.useState(false)
+      const [enabling, setEnabling] = React.useState(false)
+      const [testResult, setTestResult] = React.useState(null)
+      const [error, setError] = React.useState('')
+      const [conflicts, setConflicts] = React.useState(null)
+      const close = () => set({ syncDialog: null })
+      const sync = s.sync || {}
+      React.useEffect(() => {
+        if (view !== 'status') return
+        let live = true
+        api('/sync/conflicts').then((data) => { if (live) setConflicts(data.conflicts || []) }).catch(() => { if (live) setConflicts([]) })
+        return () => { live = false }
+      }, [view, s.sync?.conflicts])
+      async function runTest() {
+        if (testing) return
+        setTesting(true); setError(''); setTestResult(null)
+        try {
+          const data = await api('/sync/test', { method: 'POST', body: { url, token: token || undefined } })
+          setTestResult(data.result)
+          if (!data.result.ok) setError(data.result.error)
+        } catch (e) { setError(e.message) }
+        finally { setTesting(false) }
+      }
+      async function runEnable() {
+        if (enabling) return
+        setEnabling(true); setError('')
+        try {
+          await api('/sync/enable', { method: 'POST', body: { url, token, deviceName } })
+          toast('同步已开启，两边内容已合并'); close(); await refresh()
+        } catch (e) { setError(e.message) }
+        finally { setEnabling(false) }
+      }
+      async function disable() {
+        if (!window.confirm('关闭同步？本机与云端数据都不会删除；未同步的修改会保留，重新开启后继续。')) return
+        try { await api('/sync/disable', { method: 'POST' }); toast('已关闭同步'); await refresh(); close() }
+        catch (e) { toast(e.message) }
+      }
+      async function resolve(recordId, choice) {
+        try {
+          await api(`/sync/conflicts/${encodeURIComponent(recordId)}/resolve`, { method: 'POST', body: { choice } })
+          const data = await api('/sync/conflicts')
+          setConflicts(data.conflicts || [])
+          await refresh()
+        } catch (e) { toast(e.message) }
+      }
+      const field = (name, node) => h('label', { className: 'lj-sync-field' }, h('span', { className: 'lj-sync-field-name' }, name), node)
+
+      return h('section', { className: 'lj-float lj-sync-dialog', role: 'dialog', 'aria-label': '云端同步设置', onKeyDown: (e) => { if (e.key === 'Escape') close() } },
+        h('div', { className: 'lj-float-head' },
+          h('div', { className: 'lj-float-title' },
+            h('span', { className: 'lj-mark' }, h(Icon, { kind: 'grid', size: 15 })),
+            h('strong', null, '云端同步'),
+            view === 'status' && sync.enabled ? h('span', { className: 'lj-float-sub' }, sync.host) : h('span', { className: 'lj-float-sub' }, '本地优先 · 默认不上传')),
+          h('div', { className: 'lj-tools' },
+            sync.configured && h('button', { className: 'lj-quiet', onClick: () => setView(view === 'setup' ? 'status' : 'setup') }, view === 'setup' ? '查看状态' : '修改连接'),
+            h('button', { className: 'lj-icon', type: 'button', title: '关闭', 'aria-label': '关闭', onClick: close }, h(Icon, { kind: 'close', size: 16 })))),
+
+        view === 'setup' ? h('div', { className: 'lj-sync-body' },
+          h('p', { className: 'lj-sync-note' }, '填自己的 ', h('code', null, 'luanji-sync-server'), ' 服务地址与访问密钥（必填项只有这两项）。同步默认关闭，开启前可先测试连接。'),
+          field('服务地址', h('input', { className: 'lj-sync-input', value: url, placeholder: 'https://notes.example.com', onChange: (e) => { setUrl(e.target.value); setTestResult(null) } })),
+          field('访问密钥', h('span', { className: 'lj-sync-token' },
+            h('input', { className: 'lj-sync-input', type: showToken ? 'text' : 'password', value: token, placeholder: sync.hasToken ? '已保存（输入新值可替换）' : '部署服务时生成的设备 Token', autoComplete: 'off', onChange: (e) => { setToken(e.target.value); setTestResult(null) } }),
+            h('button', { type: 'button', className: 'lj-quiet', onClick: () => setShowToken(!showToken) }, showToken ? '隐藏' : '显示'))),
+          field('设备名称', h('input', { className: 'lj-sync-input', value: deviceName, placeholder: '自动填写，可修改', onChange: (e) => setDeviceName(e.target.value) })),
+          h('div', { className: 'lj-tools', style: { justifyContent: 'flex-start' } },
+            h('button', { type: 'button', className: 'lj-ghost lj-small', disabled: testing || !url.trim(), onClick: () => void runTest() }, testing ? '测试中…' : '测试连接')),
+          testResult?.ok && h('div', { className: 'lj-sync-result' },
+            h('p', null, h(Icon, { kind: 'check', size: 13 }), ` 连接成功：本机 ${testResult.localCount} 条、云端 ${testResult.activeCount} 条。`),
+            h('p', { className: 'lj-sync-meta' }, '开启后正文、引用来源与图片会在两边合并同步；草稿和本机设置不参与。带引用的内容也会上云。'),
+            h('button', { type: 'button', className: 'lj-primary', disabled: enabling, onClick: () => void runEnable() }, enabling ? '合并中…' : '启用同步并合并')),
+          error && h('p', { className: 'lj-sync-error', role: 'alert' }, error),
+          h('p', { className: 'lj-sync-links' },
+            '还没有同步服务？',
+            h('a', { href: 'https://github.com/Thomas-zz/dsh-luanji/blob/main/docs/sync-deployment.md', target: '_blank', rel: 'noreferrer' }, '部署指南'),
+            h('button', { type: 'button', className: 'lj-quiet', onClick: async () => { try { await navigator.clipboard.writeText(DEPLOY_PROMPT); toast('已复制 AI 部署提示词') } catch { toast('复制失败，请手动复制文档内容') } } }, '复制 AI 部署提示词')))
+          : h('div', { className: 'lj-sync-body' },
+            h('div', { className: 'lj-sync-stat' },
+              h('span', null, '状态：', h('strong', null, SYNC_PHASES[sync.phase] || sync.phase)),
+              sync.lastSyncAt ? h('span', { className: 'lj-sync-meta' }, `最近成功 ${syncWhen(sync.lastSyncAt)}`) : null),
+            sync.attention && h('p', { className: 'lj-sync-error', role: 'alert' },
+              sync.attention.message,
+              sync.attention.code === 'SPACE_CHANGED' && h('span', null, ' ', h('button', { type: 'button', className: 'lj-quiet', onClick: () => { setView('setup'); setUrl(sync.url); setDeviceName(sync.deviceName) } }, '重新合并 →'))),
+            sync.lastError && !sync.attention && h('p', { className: 'lj-sync-meta' }, '最近问题：', sync.lastError),
+            h('p', { className: 'lj-sync-meta' }, `待同步 ${sync.pendingOps} 条 · 待下载附件 ${sync.missingBlobs} 个 · 冲突 ${sync.conflicts} 条`),
+            sync.missingBlobs > 0 && h('div', { className: 'lj-tools', style: { justifyContent: 'flex-start' } },
+              h('button', { type: 'button', className: 'lj-ghost lj-small', onClick: async () => { try { await api('/sync/attachments/retry', { method: 'POST' }); await refresh() } catch (e) { toast(e.message) } } }, '重试下载附件')),
+            conflicts === null ? h('p', { className: 'lj-sync-meta' }, '读取冲突…')
+              : conflicts.length ? h('div', { className: 'lj-sync-conflicts' }, conflicts.map((c) => h('div', { key: c.recordId, className: 'lj-sync-conflict' },
+                h('div', { className: 'lj-sync-pair' },
+                  h(SyncPreview, { label: '本机', value: c.local.kind === 'delete' ? { deleted_at: 1, text: c.local.record?.text } : c.local.record }),
+                  h(SyncPreview, { label: '云端', value: c.remote.record })),
+                h('div', { className: 'lj-tools', style: { justifyContent: 'flex-start' } },
+                  h('button', { type: 'button', className: 'lj-ghost lj-small', onClick: () => void resolve(c.recordId, 'local') }, '保留本机'),
+                  h('button', { type: 'button', className: 'lj-ghost lj-small', onClick: () => void resolve(c.recordId, 'remote') }, '保留云端'),
+                  h('button', { type: 'button', className: 'lj-ghost lj-small', onClick: () => void resolve(c.recordId, 'both') }, '保留两份')))))
+                : h('p', { className: 'lj-sync-meta' }, '没有待处理的冲突。'),
+            h('div', { className: 'lj-tools', style: { justifyContent: 'flex-start', marginTop: 12 } },
+              h('button', { type: 'button', className: 'lj-ghost lj-small', onClick: async () => { try { await api('/sync/now', { method: 'POST' }); await refresh() } catch (e) { toast(e.message) } } }, '立即同步'),
+              sync.enabled && h('button', { type: 'button', className: 'lj-ghost lj-small lj-danger', onClick: () => void disable() }, '关闭同步'))))
+    }
+
     function Management() {
       const s = useState(), [query, setQuery] = React.useState(''), [results, setResults] = React.useState(null), [searching, setSearching] = React.useState(false)
       const file = React.useRef(null), search = React.useRef(null), page = React.useRef(null)
@@ -363,7 +533,8 @@ window.__ModuleLoader__.load({
             h('button', { className: 'lj-ghost', onClick: () => ctx.layout.selectPanel(null) }, '返回对话'))),
         h('section', { className: 'lj-compose-card' },
           h(Composer, { draftKey: 'manage' })),
-        cloud.configured && h('section', { className: 'lj-cloudbar', 'aria-label': '云端同步' },
+        h(SyncBar),
+        cloud.configured && !s.sync?.enabled && h('section', { className: 'lj-cloudbar', 'aria-label': '旧版云端同步' },
           h('span', { className: 'lj-cloud-dot', 'aria-hidden': true }),
           h('span', { className: 'lj-cloud-text' }, '云端 · ', cloud.host || cloud.url),
           h('span', { className: 'lj-cloud-meta' },
@@ -381,7 +552,7 @@ window.__ModuleLoader__.load({
               : rows.length ? h('div', { className: 'lj-cards' }, rows.map((r) => h(RecordCard, { key: r.id, record: r })))
                 : h('div', { className: 'lj-empty' }, h(Icon, { kind: 'inbox', size: 26 }), h('p', null, query ? '没有找到，换个词试试。' : '对话里划选一句话，就能记在这里。也可以直接在上面写，或贴一张图。')),
         h('footer', { className: 'lj-page-foot' },
-          h('span', { className: 'lj-meta' }, h(Icon, { kind: 'check', size: 12 }), '记录保存在本机', !cloud.configured && h('span', { className: 'lj-cloud-hint', title: '可选：在插件配置里填 cloud.url + 请求头' }, ' · 云端未配置（可选）')),
+          h('span', { className: 'lj-meta' }, h(Icon, { kind: 'check', size: 12 }), s.sync?.enabled ? `已同步到 ${s.sync.host || s.sync.url}` : '记录保存在本机', !s.sync?.enabled && !cloud.configured && h('span', { className: 'lj-cloud-hint', title: '可选：配置自己的 luanji-sync-server' }, ' · 云端未开启（可选）')),
           h('div', { className: 'lj-tools' },
             h('a', { className: 'lj-quiet', href: API + '/export', download: 'luanji-notes.json' }, '导出'),
             h('button', { className: 'lj-quiet', onClick: () => file.current.click() }, '导入'),
@@ -753,14 +924,51 @@ button:has(.lj-glyph):hover .lj-row-detail { opacity: 1; background: var(--lj-ac
 .lj-toast button:hover { background: var(--lj-accent-soft); }
 
 /* ============ 云端同步条（仅配置后出现） ============ */
-.lj-cloudbar { display: flex; align-items: center; gap: 9px; padding: 9px 13px; margin: -10px 0 18px; border: 1px solid var(--lj-line); border-radius: 13px; background: color-mix(in srgb, var(--lj-surface) 40%, transparent); font-size: 12px; color: var(--lj-muted); }
+.lj-cloudbar { display: flex; align-items: center; gap: 9px; padding: 9px 13px; margin: -10px 0 18px; border: 1px solid var(--lj-line); border-radius: 13px; background: color-mix(in srgb, var(--lj-surface) 40%, transparent); font-size: 12px; color: var(--lj-muted); flex-wrap: wrap; }
 .lj-cloud-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--dsw-alias-state-success-primary, #22c55e); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 16%, transparent); }
+.lj-cloud-dot.lj-off { background: var(--lj-faint); box-shadow: none; }
+.lj-cloud-dot.lj-warn { background: var(--dsw-alias-state-error-primary, #f25a5a); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 16%, transparent); }
+.lj-cloud-dot.lj-busy { background: var(--lj-accent); box-shadow: 0 0 0 3px var(--lj-accent-soft); }
 .lj-cloud-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--lj-text); }
-.lj-cloud-meta { color: var(--lj-faint); white-space: nowrap; }
+.lj-cloud-meta { color: var(--lj-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lj-cloud-error { color: var(--dsw-alias-state-error-primary, #f25a5a); }
 .lj-cloud-actions { margin-left: auto; display: flex; gap: 6px; flex: none; }
 .lj-ghost.lj-small { padding: 4px 9px; font-size: 12px; border-radius: 8px; }
 .lj-cloud-hint { color: var(--lj-faint); }
+.lj-image-pending { display: inline-flex; align-items: center; gap: 6px; height: 116px; padding: 0 18px; border-radius: 12px; border: 1px dashed var(--lj-line-strong); color: var(--lj-faint); font-size: 11.5px; background: color-mix(in srgb, var(--lj-surface-2) 40%, transparent); }
+
+/* ============ 云端同步设置浮层 ============ */
+.lj-sync-dialog {
+  position: fixed; z-index: 6; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(560px, calc(100vw - 32px)); max-height: min(680px, calc(100dvh - 32px)); overflow: auto;
+}
+.lj-sync-dialog .lj-composer, .lj-sync-dialog .lj-float .lj-composer { padding: 0; }
+.lj-sync-body { padding: 4px 18px 18px; display: flex; flex-direction: column; gap: 11px; }
+.lj-sync-note { margin: 0; font-size: 12.5px; color: var(--lj-muted); line-height: 1.7; }
+.lj-sync-note code { background: var(--lj-accent-soft); color: var(--lj-accent); padding: 1px 5px; border-radius: 5px; font-size: 11.5px; }
+.lj-sync-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--lj-muted); }
+.lj-sync-field-name { color: var(--lj-faint); }
+.lj-sync-input { width: 100%; padding: 8px 11px; border-radius: 10px; border: 1px solid var(--lj-line); background: color-mix(in srgb, var(--lj-surface-2) 50%, transparent); color: var(--lj-text); font-size: 13px; outline: 0 !important; }
+.lj-sync-input:focus { border-color: var(--lj-accent-line); box-shadow: 0 0 0 3px var(--lj-accent-soft); }
+.lj-sync-token { display: flex; gap: 6px; align-items: center; }
+.lj-sync-token .lj-sync-input { flex: 1; }
+.lj-sync-result { border: 1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 8%, transparent); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+.lj-sync-result p { margin: 0; display: flex; align-items: center; gap: 6px; }
+.lj-sync-result .lj-primary { align-self: flex-start; }
+.lj-sync-meta { color: var(--lj-faint); font-size: 12px; margin: 0; line-height: 1.7; }
+.lj-sync-error { color: var(--dsw-alias-state-error-primary, #f25a5a); font-size: 12.5px; margin: 0; line-height: 1.7; }
+.lj-sync-links { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: var(--lj-faint); font-size: 12px; margin: 4px 0 0; }
+.lj-sync-links a { color: var(--lj-accent); }
+.lj-sync-stat { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
+.lj-sync-conflicts { display: flex; flex-direction: column; gap: 10px; }
+.lj-sync-conflict { border: 1px solid var(--lj-line); border-radius: 13px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.lj-sync-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.lj-sync-preview { border: 1px dashed var(--lj-line-strong); border-radius: 10px; padding: 8px 10px; min-width: 0; }
+.lj-sync-preview-label { display: block; font-size: 11px; font-weight: 600; color: var(--lj-accent); margin-bottom: 3px; }
+.lj-sync-text { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--lj-text); white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.lj-sync-quote { margin: 3px 0 0; font-size: 11.5px; color: var(--lj-faint); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.lj-sync-deleted { margin: 0; font-size: 12px; color: var(--lj-faint); font-style: italic; }
+@media (max-width: 720px) { .lj-sync-pair { grid-template-columns: 1fr; } }
 
 /* ============ 详情 / 管理面板 ============ */
 .lj-page:focus, .lj-page:focus-visible { outline: none; }

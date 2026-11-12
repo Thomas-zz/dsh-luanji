@@ -12,3 +12,8 @@ docs/management-*.png
 docs/quick-note-*.png
 docs/quote-draft-*.png
 docs/ui-preview.png
+
+# 同步服务（依赖与本地数据不进仓库）
+server/node_modules/
+server/data/
+server/*.sqlite*

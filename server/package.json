@@ -1,0 +1,20 @@
+{
+  "name": "luanji-sync-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "乱记个人同步服务：SQLite + 附件目录 + 手机网页，一个容器服务一个人。",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/main.mjs",
+    "admin": "node src/admin.mjs",
+    "test": "node --test test/api.test.mjs test/web.test.mjs test/admin.test.mjs",
+    "check": "node --check src/main.mjs && node --check src/admin.mjs && node --check src/api.mjs && node --check src/web-api.mjs && node --check src/auth.mjs && node --check src/db.mjs && node --check src/config.mjs && node --check src/validate.mjs && node --check src/backup.mjs && node --check web/app.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.2.0"
+  }
+}

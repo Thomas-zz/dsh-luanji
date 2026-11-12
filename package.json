@@ -20,7 +20,11 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node --test test/host.test.mjs test/routes.test.mjs test/cloud.test.mjs"
+    "test:local": "node --test test/host.test.mjs test/routes.test.mjs test/cloud.test.mjs",
+    "pretest": "node scripts/ensure-server-deps.mjs",
+    "test": "node --test test/host.test.mjs test/routes.test.mjs test/cloud.test.mjs test/sync.test.mjs",
+    "test:server": "npm --prefix server test",
+    "lint": "node --check index.js && node --check client.js && node --check host/store.js && node --check host/routes.js && node --check host/sync.js && node --check host/sync-config.js && node --check host/cloud.js && node --check host/search.js && node --check host/tool.js && node --check scripts/sync-now.mjs && node --check scripts/ensure-server-deps.mjs && npm --prefix server run check"
   },
   "dsh": {
     "bundle": {
