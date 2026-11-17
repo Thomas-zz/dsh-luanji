@@ -75,11 +75,12 @@ window.__ModuleLoader__.load({
       returnFocus = document.activeElement
       set({ open: state.drafts.quote.quote ? 'quote' : 'quick' })
     }
-    function closeComposer() {
+    function closeComposer({ restoreFocus = true } = {}) {
       const key = state.open
       if (key) void persistDraft(key).catch(() => {})
       set({ open: null })
-      if (returnFocus) { returnFocus.focus?.({ preventScroll: true }); returnFocus = null }
+      if (restoreFocus) returnFocus?.focus?.({ preventScroll: true })
+      returnFocus = null
     }
     function manage() { if (state.open) closeComposer(); ctx.layout.selectPanel('luanji') }
     async function saveDraft(key) {
@@ -177,8 +178,8 @@ window.__ModuleLoader__.load({
         const el = input.current
         if (!el) return
         el.style.height = 'auto'
-        el.style.height = Math.min(260, Math.max(floating ? 96 : 64, el.scrollHeight)) + 'px'
-      }, [value.text, floating])
+        el.style.height = Math.min(260, Math.max(floating ? 96 : draftKey === 'manage' ? 44 : 64, el.scrollHeight)) + 'px'
+      }, [value.text, floating, draftKey])
       async function attach(files) {
         const list = [...files]
         if (processing || s.busy || !list.length) return
@@ -194,7 +195,7 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'lj-composer', onDragOver: (e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }, onDrop: (e) => { if (e.dataTransfer.files.length) { e.preventDefault(); void attach(e.dataTransfer.files) } } },
         value.quote && h(Quote, { value: value.quote, compact: true }),
         h('div', { className: 'lj-editor' },
-          h('textarea', { ref: input, className: 'lj-input', value: value.text, rows: 3, maxLength: 20000, disabled: s.busy || !s.ready, placeholder: value.quote ? '写下你的想法…' : '想到什么，记一下。', 'aria-label': value.quote ? '自己的想法' : '记录内容', onChange: (e) => changeDraft(draftKey, { text: e.target.value }), onPaste: (e) => { const files = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/')); if (files.length) { e.preventDefault(); void attach(files) } }, onKeyDown: (e) => { if (!e.nativeEvent.isComposing && (e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); if (canSave && !processing) void saveDraft(draftKey) } } }),
+          h('textarea', { ref: input, className: 'lj-input', value: value.text, rows: draftKey === 'manage' ? 2 : 3, maxLength: 20000, disabled: s.busy || !s.ready, placeholder: value.quote ? '写下你的想法…' : '想到什么，记一下。', 'aria-label': value.quote ? '自己的想法' : '记录内容', onChange: (e) => changeDraft(draftKey, { text: e.target.value }), onPaste: (e) => { const files = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/')); if (files.length) { e.preventDefault(); void attach(files) } }, onKeyDown: (e) => { if (!e.nativeEvent.isComposing && (e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); if (canSave && !processing) void saveDraft(draftKey) } } }),
           h('div', { className: 'lj-compose-actions' },
             h('button', { type: 'button', className: 'lj-tool', onClick: () => file.current.click(), disabled: processing || s.busy, title: '贴一张图片' }, h(Icon, { kind: 'image', size: 16 }), processing ? '处理中…' : '贴图'),
             h('input', { ref: file, type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', multiple: true, hidden: true, onChange: (e) => { void attach(e.target.files); e.target.value = '' } }),
@@ -204,15 +205,27 @@ window.__ModuleLoader__.load({
         s.draftStatus[draftKey] && h('button', { type: 'button', className: 'lj-draft-status', onClick: () => void persistDraft(draftKey).catch(() => {}) }, h(Icon, { kind: s.draftStatus[draftKey].includes('未') ? 'close' : 'check', size: 12 }), s.draftStatus[draftKey]))
     }
 
-    /**
-     * 侧栏面板列表里的图标。整行由 DSH 外壳渲染成一个 button：
-     * 行尾 38px 是「进面板」热区（由捕获阶段的 click 坐标判定），其余区域打开便签。
-     * 视觉上的行尾小按钮是装饰元素，不嵌套交互控件。
-     */
+    /** 图标按钮通过 portal 与宿主导航按钮并列，避免嵌套 button 和占用官方行尾。 */
     function PanelGlyph({ size = 16, active = false }) {
+      const glyph = React.useRef(null)
+      const [seat, setSeat] = React.useState(null)
+      React.useLayoutEffect(() => {
+        const row = glyph.current?.closest('button'), parent = row?.parentElement
+        if (!parent) return
+        const place = () => {
+          const icon = glyph.current.getBoundingClientRect(), box = parent.getBoundingClientRect()
+          const next = { parent, left: icon.left - box.left + parent.scrollLeft - parent.clientLeft + icon.width / 2 - 12, top: icon.top - box.top + parent.scrollTop - parent.clientTop + icon.height / 2 - 12 }
+          setSeat((prev) => prev?.parent === parent && prev.left === next.left && prev.top === next.top ? prev : next)
+        }
+        place()
+        const observer = new ResizeObserver(place)
+        observer.observe(row); observer.observe(parent); observer.observe(glyph.current)
+        window.addEventListener('resize', place)
+        return () => { observer.disconnect(); window.removeEventListener('resize', place) }
+      }, [size])
       return h(React.Fragment, null,
-        h('span', { className: 'lj-glyph' + (active ? ' lj-active' : ''), 'data-luanji-ui': '' }, h(Icon, { kind: 'note', size })),
-        h('span', { className: 'lj-row-detail', 'data-lj-detail': '', 'aria-hidden': true, 'data-luanji-ui': '' }, h(Icon, { kind: 'grid', size: 14 })))
+        h('span', { ref: glyph, className: 'lj-glyph' + (active ? ' lj-active' : ''), 'data-luanji-ui': '', style: { visibility: seat ? 'hidden' : undefined } }, h(Icon, { kind: 'note', size })),
+        seat && createPortal(h('button', { type: 'button', className: 'lj-nav-manage' + (active ? ' lj-active' : ''), 'data-luanji-ui': '', 'aria-label': '查看全部乱记', title: '查看全部记录', style: { left: seat.left, top: seat.top }, onClick: (event) => { event.stopPropagation(); manage() } }, h(Icon, { kind: 'note', size })), seat.parent))
     }
 
     /** 浮窗定位：默认贴在侧栏行右侧；窄屏变成底部卡片。 */
@@ -237,11 +250,11 @@ window.__ModuleLoader__.load({
       const s = useState()
       return createPortal(h('div', { className: 'lj-overlays', 'data-luanji-ui': '' },
         s.syncDialog && h(SyncDialog),
-        s.open && h('section', { className: 'lj-float', role: 'dialog', 'aria-label': s.open === 'quote' ? '引用并记录' : '乱记便签', style: floatStyle(anchorNow()), onKeyDown: (e) => { if (e.key === 'Escape' && !s.busy) { e.stopPropagation(); closeComposer() } } },
+        s.open && h('section', { className: 'lj-float', 'data-lj-composer': '', role: 'dialog', 'aria-label': s.open === 'quote' ? '引用并记录' : '乱记便签', style: floatStyle(anchorNow()), onKeyDown: (e) => { if (e.key === 'Escape' && !s.busy) { e.stopPropagation(); closeComposer() } } },
           h('div', { className: 'lj-float-head' },
             h('div', { className: 'lj-float-title' }, h('span', { className: 'lj-mark' }, h(Icon, { kind: 'note', size: 15 })), h('strong', null, s.open === 'quote' ? '引用并记录' : '乱记'), h('span', { className: 'lj-float-sub' }, s.open === 'quote' ? '原文在上，想法在下' : '先留下，再理解')),
             h('div', { className: 'lj-tools' },
-              h('button', { className: 'lj-icon', type: 'button', title: '打开乱记面板', 'aria-label': '打开乱记面板', onClick: manage }, h(Icon, { kind: 'grid', size: 15 })),
+              h('button', { className: 'lj-quiet', type: 'button', onClick: manage }, '全部记录', h(Icon, { kind: 'arrow', size: 13 })),
               h('button', { className: 'lj-icon', type: 'button', title: '收起，保留草稿', 'aria-label': '收起便签', disabled: s.busy, onClick: closeComposer }, h(Icon, { kind: 'close', size: 16 })))),
           s.error && h('div', { className: 'lj-error', role: 'alert' }, s.error, h('button', { className: 'lj-quiet', onClick: () => void refresh() }, '重试')),
           h(Composer, { draftKey: s.open, floating: true }),
@@ -340,32 +353,15 @@ window.__ModuleLoader__.load({
       '涉及尚未授权的生产变更时先展示具体改动并取得授权；缺域名或证书信息时报告缺项，不要擅自关闭 TLS 校验。',
     ].join('\n')
 
-    /** 管理页里的同步状态条（未开启时是入口，开启后是状态卡）。 */
-    function SyncBar() {
-      const s = useState()
-      const sync = s.sync
-      if (!sync || !sync.configured) {
-        return h('section', { className: 'lj-cloudbar', 'aria-label': '云端同步' },
-          h('span', { className: 'lj-cloud-dot lj-off', 'aria-hidden': true }),
-          h('span', { className: 'lj-cloud-text' }, '云端同步 · 未开启'),
-          h('span', { className: 'lj-cloud-meta' }, '记录保存在本机。开启后可与其他设备同步。'),
-          h('div', { className: 'lj-cloud-actions' },
-            h('button', { type: 'button', className: 'lj-ghost lj-small', onClick: () => set({ syncDialog: 'setup' }) }, '配置自己的服务器')))
-      }
-      const phaseText = SYNC_PHASES[sync.phase] || sync.phase
-      const problem = sync.phase === 'conflict' || sync.phase === 'attention' || (sync.lastError && sync.phase === 'waiting')
-      return h('section', { className: 'lj-cloudbar', 'aria-label': '云端同步' },
-        h('span', { className: 'lj-cloud-dot' + (problem ? ' lj-warn' : sync.phase === 'syncing' ? ' lj-busy' : ''), 'aria-hidden': true }),
-        h('span', { className: 'lj-cloud-text' }, '云端 · ', sync.host || sync.url),
-        h('span', { className: 'lj-cloud-meta' },
-          '状态：', phaseText,
-          sync.lastSyncAt ? ` · 最近成功 ${syncWhen(sync.lastSyncAt)}` : '',
-          sync.pendingOps ? ` · 待同步 ${sync.pendingOps} 条` : '',
-          sync.missingBlobs ? ` · 待下载附件 ${sync.missingBlobs} 个` : '',
-          sync.conflicts ? ` · 冲突 ${sync.conflicts} 条` : ''),
-        h('div', { className: 'lj-cloud-actions' },
-          h('button', { type: 'button', className: 'lj-ghost lj-small', onClick: async () => { try { await api('/sync/now', { method: 'POST' }); await refresh() } catch (e) { toast(e.message) } } }, '立即同步'),
-          h('button', { type: 'button', className: 'lj-ghost lj-small', onClick: () => set({ syncDialog: 'status' }) }, sync.conflicts || sync.attention ? '查看详情' : '详情')))
+    /** 将同步状态与设置入口收进工具栏，异常状态仍直接可见。 */
+    function SyncButton() {
+      const { sync } = useState()
+      const configured = sync?.configured
+      const problem = configured && (sync.conflicts || sync.attention || ['conflict', 'attention'].includes(sync.phase) || (sync.lastError && sync.phase === 'waiting'))
+      const label = !configured || !sync.enabled ? '仅本机' : SYNC_PHASES[sync.phase] || '云端同步'
+      return h('button', { type: 'button', className: 'lj-ghost lj-sync-button', title: configured ? '查看同步状态与设置' : '记录保存在本机，点击配置云端同步', 'aria-label': '同步设置：' + label, onClick: () => set({ syncDialog: configured ? 'status' : 'setup' }) },
+        h('span', { className: 'lj-cloud-dot' + (problem ? ' lj-warn' : !configured || !sync.enabled ? ' lj-off' : sync.phase === 'syncing' ? ' lj-busy' : ''), 'aria-hidden': true }),
+        problem ? '同步需处理' : label)
     }
 
     /** 冲突/记录预览（本地格式或 wire 格式都只取文本、引用与附件数）。 */
@@ -522,41 +518,40 @@ window.__ModuleLoader__.load({
       const cloud = s.cloud || { configured: false }
       const cloudWhen = (ms) => ms ? new Date(ms).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
       const rows = results || s.records
-      return h('main', { className: 'lj-page', 'data-luanji-ui': '', ref: page, tabIndex: -1, onKeyDown: (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); search.current.focus() } } },
-        h('div', { className: 'lj-page-glow', 'aria-hidden': true }),
-        h('header', { className: 'lj-hero' },
-          h('div', { className: 'lj-hero-brand' },
-            h('span', { className: 'lj-hero-mark' }, h(Icon, { kind: 'note', size: 20 })),
-            h('div', null, h('h1', null, '乱记'), h('p', null, '随手留下，需要时找回来。'))),
-          h('div', { className: 'lj-hero-actions' },
-            s.loaded && h('span', { className: 'lj-pill' }, `${s.records.length} 条`),
-            h('button', { className: 'lj-ghost', onClick: () => ctx.layout.selectPanel(null) }, '返回对话'))),
-        h('section', { className: 'lj-compose-card' },
-          h(Composer, { draftKey: 'manage' })),
-        h(SyncBar),
-        cloud.configured && !s.sync?.enabled && h('section', { className: 'lj-cloudbar', 'aria-label': '旧版云端同步' },
-          h('span', { className: 'lj-cloud-dot', 'aria-hidden': true }),
-          h('span', { className: 'lj-cloud-text' }, '云端 · ', cloud.host || cloud.url),
-          h('span', { className: 'lj-cloud-meta' },
-            cloud.lastPullAt ? `上次拉取 ${cloudWhen(cloud.lastPullAt)}` : '尚未拉取',
-            cloud.lastError && h('span', { className: 'lj-cloud-error', title: cloud.lastError }, ' · 上次失败')),
-          h('div', { className: 'lj-cloud-actions' },
-            h('button', { type: 'button', className: 'lj-ghost lj-small', disabled: Boolean(cloudBusy), onClick: () => void syncCloud('pull') }, cloudBusy === 'pull' ? '拉取中…' : '从云端拉取'),
-            h('button', { type: 'button', className: 'lj-ghost lj-small', disabled: Boolean(cloudBusy), onClick: () => void syncCloud('push') }, cloudBusy === 'push' ? '推送中…' : '推到云端'))),
-        h('div', { className: 'lj-list-head' },
-          h('div', { className: 'lj-list-title' }, h('h2', null, query ? '查找记录' : '最近记录'), query && !searching && results && h('span', { className: 'lj-count' }, `${results.length} 条`)),
-          h('label', { className: 'lj-search' }, h(Icon, { kind: 'search', size: 15 }), h('input', { ref: search, type: 'search', value: query, placeholder: '找原话、模型或对话', 'aria-label': '搜索记录', onChange: (e) => setQuery(e.target.value) }))),
-        s.error ? h('div', { className: 'lj-empty' }, h(Icon, { kind: 'note', size: 22 }), h('p', null, s.error), h('button', { className: 'lj-ghost', onClick: () => void refresh() }, '重试'))
-          : !s.loaded ? h('div', { className: 'lj-empty lj-loading' }, '正在读取本机记录…')
-            : searching ? h('div', { className: 'lj-empty' }, '查找中…')
-              : rows.length ? h('div', { className: 'lj-cards' }, rows.map((r) => h(RecordCard, { key: r.id, record: r })))
-                : h('div', { className: 'lj-empty' }, h(Icon, { kind: 'inbox', size: 26 }), h('p', null, query ? '没有找到，换个词试试。' : '对话里划选一句话，就能记在这里。也可以直接在上面写，或贴一张图。')),
-        h('footer', { className: 'lj-page-foot' },
-          h('span', { className: 'lj-meta' }, h(Icon, { kind: 'check', size: 12 }), s.sync?.enabled ? `已同步到 ${s.sync.host || s.sync.url}` : '记录保存在本机', !s.sync?.enabled && !cloud.configured && h('span', { className: 'lj-cloud-hint', title: '可选：配置自己的 luanji-sync-server' }, ' · 云端未开启（可选）')),
-          h('div', { className: 'lj-tools' },
-            h('a', { className: 'lj-quiet', href: API + '/export', download: 'luanji-notes.json' }, '导出'),
-            h('button', { className: 'lj-quiet', onClick: () => file.current.click() }, '导入'),
-            h('input', { ref: file, type: 'file', accept: '.json', hidden: true, onChange: (e) => { void importFile(e.target.files[0]); e.target.value = '' } }))))
+      return h('main', { className: 'lj-page', 'data-luanji-ui': '', ref: page, tabIndex: -1, onKeyDown: (e) => { if (e.nativeEvent.isComposing) return; if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); search.current.focus() } } },
+        h('header', { className: 'lj-page-top' },
+          h('div', { className: 'lj-toolbar' },
+            h('div', { className: 'lj-hero-brand' },
+              h('h1', null, '乱记'),
+              s.loaded && h('span', { className: 'lj-count', role: 'status' }, query.trim() && results ? `${results.length} / ${s.records.length} 条` : `${s.records.length} 条`)),
+            h('label', { className: 'lj-search' }, h(Icon, { kind: 'search', size: 15 }), h('input', { ref: search, type: 'search', value: query, placeholder: '搜索记录、原话或对话', 'aria-label': '搜索记录', onChange: (e) => setQuery(e.target.value) }), query && h('button', { type: 'button', className: 'lj-icon', 'aria-label': '清空搜索', onClick: () => { setQuery(''); search.current.focus() } }, h(Icon, { kind: 'close', size: 13 }))),
+            h('div', { className: 'lj-hero-actions' },
+              h(SyncButton),
+              h('button', { className: 'lj-quiet', onClick: () => ctx.layout.selectPanel(null) }, '返回对话')))),
+        h('div', { className: 'lj-page-body', tabIndex: 0, role: 'region', 'aria-label': '乱记记录列表' },
+          h('div', { className: 'lj-content' },
+            h('section', { id: 'lj-manage-composer', className: 'lj-compose-card', 'aria-label': '新建记录' },
+              h(Composer, { draftKey: 'manage' })),
+            cloud.configured && !s.sync?.enabled && h('section', { className: 'lj-cloudbar', 'aria-label': '旧版云端同步' },
+              h('span', { className: 'lj-cloud-dot', 'aria-hidden': true }),
+              h('span', { className: 'lj-cloud-text' }, '云端 · ', cloud.host || cloud.url),
+              h('span', { className: 'lj-cloud-meta' },
+                cloud.lastPullAt ? `上次拉取 ${cloudWhen(cloud.lastPullAt)}` : '尚未拉取',
+                cloud.lastError && h('span', { className: 'lj-cloud-error', title: cloud.lastError }, ' · 上次失败')),
+              h('div', { className: 'lj-cloud-actions' },
+                h('button', { type: 'button', className: 'lj-ghost lj-small', disabled: Boolean(cloudBusy), onClick: () => void syncCloud('pull') }, cloudBusy === 'pull' ? '拉取中…' : '从云端拉取'),
+                h('button', { type: 'button', className: 'lj-ghost lj-small', disabled: Boolean(cloudBusy), onClick: () => void syncCloud('push') }, cloudBusy === 'push' ? '推送中…' : '推到云端'))),
+            s.error ? h('div', { className: 'lj-empty' }, h(Icon, { kind: 'note', size: 22 }), h('p', null, s.error), h('button', { className: 'lj-ghost', onClick: () => void refresh() }, '重试'))
+              : !s.loaded ? h('div', { className: 'lj-empty lj-loading' }, '正在读取本机记录…')
+                : searching ? h('div', { className: 'lj-empty' }, '查找中…')
+                  : rows.length ? h('div', { className: 'lj-cards' }, rows.map((r) => h(RecordCard, { key: r.id, record: r })))
+                    : h('div', { className: 'lj-empty' }, h(Icon, { kind: 'inbox', size: 26 }), h('p', null, query ? '没有找到，换个词试试。' : '还没有记录。在上方写下想法，或在对话里划选一句话留下来。')),
+            h('footer', { className: 'lj-page-foot' },
+              h('span', { className: 'lj-meta' }, h(Icon, { kind: 'check', size: 12 }), s.sync?.enabled ? `云端同步：${SYNC_PHASES[s.sync.phase] || '已开启'}` : '记录保存在本机', !s.sync?.enabled && !cloud.configured && h('span', { className: 'lj-cloud-hint', title: '可选：配置自己的 luanji-sync-server' }, ' · 云端未开启（可选）')),
+              h('div', { className: 'lj-tools' },
+                h('a', { className: 'lj-quiet', href: API + '/export', download: 'luanji-notes.json' }, '导出'),
+                h('button', { className: 'lj-quiet', onClick: () => file.current.click() }, '导入'),
+                h('input', { ref: file, type: 'file', accept: '.json', hidden: true, onChange: (e) => { void importFile(e.target.files[0]); e.target.value = '' } }))))))
     }
 
     // DSH 0.2.1: stable semantic node attributes + session-owned event source.
@@ -684,16 +679,13 @@ window.__ModuleLoader__.load({
       ctx.effect(() => {
         disposed = false
         const style = document.createElement('style'); style.dataset.luanji = ''; style.textContent = STYLES; document.head.append(style)
-        // 面板列表这一行由 DSH 外壳渲染：行尾 38px 进面板，其余区域打开记录便签。
-        const DETAIL_ZONE = 38
+        // 只拦截乱记导航主按钮；独立图标和官方图钉各自处理点击。
         const rowClick = (event) => {
           const target = event.target
           if (!(target instanceof Element)) return
           const row = target.closest('button')
           if (!row || !row.querySelector?.('.lj-glyph')) return
-          const rect = row.getBoundingClientRect()
           event.preventDefault(); event.stopPropagation()
-          if (rect.width > 120 && event.clientX >= rect.right - DETAIL_ZONE) { manage(); return }
           openQuick()
         }
         const keyboard = (event) => {
@@ -701,8 +693,15 @@ window.__ModuleLoader__.load({
           if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === 'KeyL') { event.preventDefault(); openQuick() }
           else if (event.key === 'Escape' && state.open) closeComposer()
         }
+        const outsidePointerDown = (event) => {
+          if (!state.open || state.busy || event.button !== 0 || event.isPrimary === false) return
+          if (event.composedPath().some((node) => node instanceof Element && node.hasAttribute('data-lj-composer'))) return
+          // 保留草稿，不拦截外部点击，也不把焦点抢回原入口。
+          closeComposer({ restoreFocus: false })
+        }
         document.addEventListener('click', rowClick, true)
         document.addEventListener('keydown', keyboard)
+        document.addEventListener('pointerdown', outsidePointerDown, true)
         const observer = new MutationObserver((mutations) => {
           watchRow()
           if (mutations.some((m) => !(m.target.nodeType === 1 ? m.target : m.target.parentElement)?.closest('[data-luanji-ui],style'))) scheduleHighlights()
@@ -718,7 +717,7 @@ window.__ModuleLoader__.load({
           const row = document.querySelector('.lj-glyph')?.closest('button')
           if (!row || row === watchedRow) return
           watchedRow = row
-          row.setAttribute('aria-description', '点按打开记录便签；行尾小按钮进入乱记面板')
+          row.setAttribute('aria-description', '点按打开记录便签；左侧纸张按钮查看全部记录')
           rowObserver?.disconnect(); rowObserver = new ResizeObserver(reflow); rowObserver.observe(row)
         }
         const layoutObserver = new ResizeObserver(reflow)
@@ -730,6 +729,7 @@ window.__ModuleLoader__.load({
           for (const [key] of timers) void persistDraft(key).catch(() => {})
           disposed = true; style.remove(); observer.disconnect(); layoutObserver.disconnect(); rowObserver?.disconnect(); watchedRow?.removeAttribute?.('aria-description'); unsubscribe(); clearInterval(interval); clearTimeout(highlightTimer); clearTimeout(toastTimer); cancelAnimationFrame(frame)
           document.removeEventListener('click', rowClick, true); document.removeEventListener('keydown', keyboard); window.removeEventListener('focus', focus); window.removeEventListener('resize', reflow)
+          document.removeEventListener('pointerdown', outsidePointerDown, true)
           window.CSS?.highlights?.delete('luanji-recorded')
         }
       }, 'luanji: selection and persistent marks')
@@ -802,19 +802,20 @@ body[data-ds-dark-theme] [data-luanji-ui] {
 [data-luanji-ui] a { color: inherit; text-decoration: none; }
 [data-luanji-ui] svg { display: block; flex: none; }
 
-/* ============ 侧栏面板行：整行开便签，行尾小按钮进面板 ============ */
+/* ============ 侧栏：左侧图标进管理页，导航主按钮开便签 ============ */
 .lj-glyph { display: inline-flex; align-items: center; justify-content: center; color: inherit; }
-.lj-glyph.lj-active { color: var(--lj-accent); }
-button:has(.lj-glyph) { position: relative; padding-right: 38px !important; }
-.lj-row-detail {
-  position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
-  width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 7px; color: var(--lj-muted); opacity: .78; pointer-events: none;
-  transition: opacity .14s, background .14s, color .14s;
+.lj-active { color: var(--lj-accent); }
+:has(> button .lj-glyph) { position: relative; }
+/* 此按钮自身就是 data-luanji-ui 根节点，必须显式清除浏览器默认按钮外观。 */
+button.lj-nav-manage {
+  appearance: none; -webkit-appearance: none; border: 0; outline: none; box-shadow: none; background: transparent;
+  position: absolute; width: 24px; height: 24px; margin: 0; padding: 0; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; border-radius: 7px;
+  color: var(--lj-muted); opacity: .78; transition: opacity .14s, background .14s, color .14s;
 }
-button:has(.lj-glyph):hover .lj-row-detail { opacity: 1; background: var(--lj-accent-soft); color: var(--lj-accent); }
-[class*="collapsed"] .lj-row-detail { display: none !important; }
-[class*="collapsed"] button:has(.lj-glyph) { padding-right: 0 !important; }
+button.lj-nav-manage.lj-active { color: var(--lj-accent); }
+button.lj-nav-manage:hover { opacity: 1; color: var(--lj-accent); background: var(--lj-accent-soft); }
+button.lj-nav-manage:focus-visible { opacity: 1; outline: 2px solid var(--lj-accent); outline-offset: 2px; }
 ::highlight(luanji-recorded) {
   background-color: color-mix(in srgb, var(--dsw-static-deepseek-450, #5686fe) 22%, transparent);
   text-decoration: underline; text-decoration-color: var(--dsw-static-deepseek-450, #5686fe);
@@ -924,7 +925,7 @@ button:has(.lj-glyph):hover .lj-row-detail { opacity: 1; background: var(--lj-ac
 .lj-toast button:hover { background: var(--lj-accent-soft); }
 
 /* ============ 云端同步条（仅配置后出现） ============ */
-.lj-cloudbar { display: flex; align-items: center; gap: 9px; padding: 9px 13px; margin: -10px 0 18px; border: 1px solid var(--lj-line); border-radius: 13px; background: color-mix(in srgb, var(--lj-surface) 40%, transparent); font-size: 12px; color: var(--lj-muted); flex-wrap: wrap; }
+.lj-cloudbar { display: flex; align-items: center; gap: 9px; padding: 9px 13px; margin: 0 0 14px; border: 1px solid var(--lj-line); border-radius: 13px; background: color-mix(in srgb, var(--lj-surface) 40%, transparent); font-size: 12px; color: var(--lj-muted); flex-wrap: wrap; }
 .lj-cloud-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--dsw-alias-state-success-primary, #22c55e); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 16%, transparent); }
 .lj-cloud-dot.lj-off { background: var(--lj-faint); box-shadow: none; }
 .lj-cloud-dot.lj-warn { background: var(--dsw-alias-state-error-primary, #f25a5a); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 16%, transparent); }
@@ -973,65 +974,53 @@ button:has(.lj-glyph):hover .lj-row-detail { opacity: 1; background: var(--lj-ac
 /* ============ 详情 / 管理面板 ============ */
 .lj-page:focus, .lj-page:focus-visible { outline: none; }
 .lj-page {
-  width: 100%; max-width: 820px; height: 100%; overflow-y: auto; margin: 0 auto; position: relative;
-  padding: calc(var(--dsh-frame-top-clearance, 0px) + 34px) 32px 40px;
+  width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column; padding-top: max(8px, var(--dsh-frame-top-clearance, 0px));
+  background: var(--lj-surface); container-type: inline-size;
 }
-.lj-page-glow { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: min(900px, 120%); height: 320px; pointer-events: none;
-  background: radial-gradient(60% 100% at 50% 0%, var(--lj-glow), transparent 72%); }
-.lj-hero { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
-.lj-hero-brand { display: flex; align-items: center; gap: 13px; }
-.lj-hero-mark { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 13px; color: var(--lj-accent);
-  background: linear-gradient(145deg, color-mix(in srgb, var(--lj-accent) 22%, transparent), color-mix(in srgb, var(--lj-accent) 6%, transparent));
-  border: 1px solid color-mix(in srgb, var(--lj-accent) 22%, transparent); box-shadow: 0 8px 20px -12px color-mix(in srgb, var(--lj-accent) 60%, transparent); }
-.lj-hero h1 { font-size: 22px; line-height: 1.3; margin: 0; font-weight: 650; letter-spacing: .01em; }
-.lj-hero p { margin: 4px 0 0; color: var(--lj-muted); font-size: 13px; }
-.lj-hero-actions { display: flex; align-items: center; gap: 10px; padding-top: 4px; }
-.lj-pill { font-size: 12px; color: var(--lj-muted); padding: 4px 10px; border-radius: 999px; background: color-mix(in srgb, var(--lj-surface-2) 60%, transparent); border: 1px solid var(--lj-line); }
+.lj-page-top { width: 100%; max-width: 908px; margin: 0 auto; padding: 0 24px; flex: none; }
+.lj-page-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--lj-line-strong) transparent; }
+.lj-page-body:hover, .lj-page-body:focus-visible { scrollbar-color: var(--lj-faint) transparent; }
+.lj-content { width: 100%; max-width: 908px; min-width: 0; margin: 0 auto; padding: 0 24px 24px; }
+.lj-toolbar { display: flex; align-items: center; gap: 12px; min-height: 34px; margin-bottom: 10px; }
+.lj-hero-brand { display: flex; align-items: baseline; gap: 8px; flex: none; white-space: nowrap; }
+.lj-hero-brand h1 { font-size: 18px; line-height: 1.4; margin: 0; font-weight: 600; }
+.lj-hero-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+button.lj-sync-button { display: inline-flex; align-items: center; gap: 7px; }
+.lj-toolbar .lj-sync-button { padding: 4px 6px; border: 0; background: transparent; font-size: 12px; }
 .lj-ghost { font-size: 13px; color: var(--lj-muted); padding: 6px 10px; border-radius: 9px; border: 1px solid var(--lj-line); background: color-mix(in srgb, var(--lj-surface) 55%, transparent); transition: background .14s, color .14s, border-color .14s; }
 .lj-ghost:hover { background: var(--lj-hover); color: var(--lj-text); border-color: var(--lj-line-strong); }
 
-.lj-compose-card {
-  position: relative; padding: 16px 18px 14px; border-radius: 18px; margin-bottom: 26px;
-  background: var(--lj-glass); border: 1px solid var(--lj-line-strong);
-  box-shadow: 0 1px 0 rgb(255 255 255 / .03) inset, 0 16px 40px -28px rgb(0 0 0 / .6);
-  backdrop-filter: blur(24px) saturate(150%); -webkit-backdrop-filter: blur(24px) saturate(150%);
-}
-.lj-compose-card::before {
-  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  background: radial-gradient(90% 120% at 0% 0%, var(--lj-accent-soft), transparent 55%);
-}
-.lj-compose-card > * { position: relative; }
+.lj-compose-card { padding: 10px 14px; border-radius: 12px; margin-bottom: 14px; background: var(--lj-surface-2); border: 1px solid var(--lj-line-strong); }
 .lj-compose-card .lj-composer .lj-editor { border-color: transparent; background: transparent; padding: 0; box-shadow: none !important; }
 .lj-compose-card .lj-composer { gap: 0; }
+.lj-compose-card .lj-input { min-height: 44px; line-height: 1.6; }
+.lj-compose-card .lj-compose-actions { padding-top: 4px; }
 
-.lj-list-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 12px; }
-.lj-list-title { display: flex; align-items: baseline; gap: 10px; }
-.lj-list-title h2 { font-size: 13px; font-weight: 600; color: var(--lj-muted); margin: 0; letter-spacing: .02em; }
 .lj-search {
-  display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 12px; border-radius: 11px;
+  display: flex; flex: 1; max-width: 320px; margin-left: auto; align-items: center; gap: 8px; min-width: 0; padding: 5px 10px; border-radius: 8px;
   background: color-mix(in srgb, var(--lj-surface) 60%, transparent); border: 1px solid var(--lj-line);
   color: var(--lj-faint); transition: border-color .16s, background .16s, box-shadow .16s;
 }
 .lj-search:focus-within { border-color: var(--lj-accent-line); background: var(--lj-glass-strong); box-shadow: 0 0 0 3px var(--lj-accent-soft); color: var(--lj-accent); }
-.lj-search input { min-width: 0; width: 176px; border: 0; background: none; outline: 0 !important; padding: 0; font-size: 12.5px; color: var(--lj-text); }
+.lj-search input { min-width: 0; width: 100%; border: 0; background: none; outline: 0 !important; padding: 0; font-size: 12.5px; color: var(--lj-text); }
 .lj-search input::-webkit-search-cancel-button { -webkit-appearance: none; }
 
 .lj-cards { display: flex; flex-direction: column; gap: 12px; }
 .lj-card {
-  position: relative; padding: 16px 18px 12px; border-radius: 17px;
+  position: relative; min-width: 0; padding: 16px 18px 12px; border-radius: 12px;
   background: var(--lj-card-bg);
   border: 1px solid var(--lj-card-border);
-  box-shadow: 0 1px 0 var(--lj-line) inset, var(--lj-card-shadow);
-  transition: border-color .16s, background .16s, transform .16s, box-shadow .16s;
+  transition: border-color .16s, background .16s;
 }
-.lj-card:hover { border-color: var(--lj-line-strong); background: color-mix(in srgb, var(--lj-surface-2) 92%, transparent); box-shadow: 0 1px 0 var(--lj-line-strong) inset, 0 22px 46px -34px rgb(0 0 0 / .8); }
+.lj-card:hover { border-color: var(--lj-line-strong); background: var(--lj-surface-2); }
 .lj-card .lj-quote { margin-top: 0; padding: 11px 12px 10px 13px; }
 .lj-card .lj-quote blockquote { font-size: 13.5px; }
-.lj-card-text { margin: 2px 0 4px; font-size: 15px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--lj-text); }
+.lj-card-text { margin: 2px 0 4px; font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--lj-text); }
 .lj-card .lj-quote + .lj-card-text { margin-top: 12px; }
-.lj-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
+.lj-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .lj-meta { display: inline-flex; align-items: center; gap: 5px; color: var(--lj-faint); font-size: 11.5px; }
-.lj-card-actions { display: flex; align-items: center; gap: 2px; opacity: 0; transform: translateY(1px); transition: opacity .15s; }
+.lj-card-actions { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; opacity: 0; transform: translateY(1px); transition: opacity .15s; }
 .lj-card:hover .lj-card-actions, .lj-card:focus-within .lj-card-actions { opacity: 1; }
 .lj-card-actions .lj-quiet { color: var(--lj-muted); }
 .lj-card-actions .lj-quiet:hover { color: var(--lj-accent); }
@@ -1049,26 +1038,31 @@ button:has(.lj-glyph):hover .lj-row-detail { opacity: 1; background: var(--lj-ac
 .lj-empty > svg { color: var(--lj-faint); opacity: .8; }
 .lj-empty .lj-ghost { margin-top: 4px; }
 .lj-loading { min-height: 140px; }
-.lj-page-foot { display: flex; align-items: center; justify-content: space-between; color: var(--lj-faint); padding-top: 26px; margin-top: 8px; border-top: 1px solid var(--lj-line); }
+.lj-page-foot { display: flex; align-items: center; justify-content: space-between; color: var(--lj-faint); padding-top: 16px; gap: 12px; flex-wrap: wrap; margin-top: 8px; border-top: 1px solid var(--lj-line); }
 .lj-error { margin: 8px 16px; color: var(--dsw-alias-state-error-primary, #f25a5a); font-size: 12px; }
 
 @keyframes lj-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes lj-pop { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @media (max-width: 720px) {
-  .lj-page { padding-left: 18px; padding-right: 18px; }
-  .lj-hero { flex-direction: column; }
-  .lj-hero-actions { align-self: stretch; justify-content: space-between; }
-  .lj-list-head { flex-wrap: wrap; }
+  .lj-page-top, .lj-content { padding-left: 16px; padding-right: 16px; }
   .lj-search { flex: 1; }
   .lj-search input { width: 100%; }
   .lj-float {
     left: 12px !important; right: 12px; top: auto !important; bottom: max(12px, env(safe-area-inset-bottom));
     width: auto !important; max-height: min(78dvh, 640px) !important; transform-origin: center bottom;
   }
-  .lj-card-actions { opacity: 1; }
+  .lj-card-actions { opacity: 1; flex-wrap: wrap; }
+  .lj-card { padding: 12px; }
   .lj-float-sub { display: none; }
 }
+@container (max-width: 560px) {
+  .lj-toolbar { flex-wrap: wrap; gap: 6px 12px; }
+  .lj-hero-actions { margin-left: auto; }
+  .lj-toolbar .lj-search { order: 3; flex-basis: 100%; max-width: none; margin-left: 0; }
+}
+@media (hover: none) { .lj-card-actions { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
+  [data-luanji-ui] *, [data-luanji-ui] { transition: none !important; }
   .lj-float, .lj-selbar, .lj-toast { animation: none; }
 }
 `
