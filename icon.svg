@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- 乱记：一张微微倾斜的纸，右上一枚朱印 -->
+  <rect x="5.2" y="3.4" width="13" height="17" rx="1.4" transform="rotate(-2.2 11.7 11.9)"
+        fill="#fcfaf4" stroke="#2d2a24" stroke-width="1.25"/>
+  <line x1="8" y1="7.6" x2="15.4" y2="7.35" stroke="#686256" stroke-width="1.1" stroke-linecap="round"/>
+  <line x1="8.1" y1="10.6" x2="15.5" y2="10.35" stroke="#686256" stroke-width="1.1" stroke-linecap="round"/>
+  <line x1="8.2" y1="13.6" x2="13.2" y2="13.4" stroke="#686256" stroke-width="1.1" stroke-linecap="round"/>
+  <rect x="14.1" y="4.6" width="3.4" height="3.4" rx="0.7" transform="rotate(6 15.8 6.3)"
+        fill="#9f3927"/>
+</svg>

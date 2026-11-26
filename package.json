@@ -1,0 +1,46 @@
+{
+  "name": "@dsh-external/dsh-luanji",
+  "version": "0.5.2",
+  "private": true,
+  "type": "module",
+  "description": "乱记 for DSH：划选记录、引用思考、随手便签。原文留在本机，记住每句话的来处。",
+  "license": "MIT",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "host/*.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md"
+  ],
+  "scripts": {
+    "test:local": "node --test test/host.test.mjs test/routes.test.mjs test/cloud.test.mjs",
+    "pretest": "node scripts/ensure-server-deps.mjs",
+    "test": "node --test test/host.test.mjs test/routes.test.mjs test/cloud.test.mjs test/sync.test.mjs",
+    "test:server": "npm --prefix server test",
+    "lint": "node --check index.js && node --check client.js && node --check host/store.js && node --check host/routes.js && node --check host/sync.js && node --check host/sync-config.js && node --check host/cloud.js && node --check host/search.js && node --check host/tool.js && node --check scripts/sync-now.mjs && node --check scripts/ensure-server-deps.mjs && npm --prefix server run check",
+    "release": "node ../tools/release.mjs",
+    "audit": "node ../tools/release-audit.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-chat",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ]
+    }
+  }
+}

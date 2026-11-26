@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>乱记 · 随手看</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 登录 -->
+    <section id="view-login" class="view" hidden>
+      <div class="login-card">
+        <div class="brand"><span class="mark">✎</span><div><h1>乱记</h1><p>你自己的笔记本，在手机上随手看。</p></div></div>
+        <form id="login-form">
+          <input type="password" id="login-password" placeholder="手机登录口令" autocomplete="current-password" required>
+          <button type="submit" id="login-submit" class="primary">登录</button>
+          <p class="hint" id="login-error" role="alert"></p>
+        </form>
+      </div>
+    </section>
+
+    <!-- 主界面 -->
+    <section id="view-main" class="view" hidden>
+      <header class="bar">
+        <div class="bar-title"><span class="mark">✎</span> 乱记 <span class="count" id="count"></span></div>
+        <div class="bar-actions">
+          <button id="logout" class="ghost" type="button">退出</button>
+        </div>
+      </header>
+
+      <div class="searchbar">
+        <input type="search" id="search" placeholder="找一句话、一个词" autocomplete="off">
+      </div>
+
+      <main id="list" class="list" aria-live="polite"></main>
+      <div class="list-foot">
+        <button id="more" class="ghost wide" type="button" hidden>加载更多</button>
+        <p id="empty" class="empty" hidden>还没有记录。点右下角 ＋ 写一条。</p>
+      </div>
+
+      <button id="new" class="fab" type="button" aria-label="新建记录">＋</button>
+    </section>
+
+    <!-- 编辑器（新建 / 编辑共用） -->
+    <section id="view-editor" class="view editor" hidden>
+      <header class="bar">
+        <button id="editor-cancel" class="ghost" type="button">取消</button>
+        <div class="bar-title" id="editor-title">新建</div>
+        <button id="editor-save" class="primary small" type="button">保存</button>
+      </header>
+      <div class="editor-body">
+        <div id="editor-quote" class="quote" hidden></div>
+        <textarea id="editor-text" placeholder="想到什么，记一下" maxlength="20000"></textarea>
+        <div id="editor-images" class="thumbs"></div>
+        <div class="editor-tools">
+          <button id="attach" class="ghost" type="button">贴图</button>
+          <input type="file" id="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+          <span class="hint" id="editor-status"></span>
+        </div>
+      </div>
+    </section>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>
